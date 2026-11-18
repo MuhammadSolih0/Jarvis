@@ -22,6 +22,7 @@ import android.webkit.JavascriptInterface;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
@@ -261,6 +262,30 @@ public class MainActivity extends Activity {
         }).start();
     }
 
+    private ArrayList<String> listVoices(String key) throws Exception {
+        HttpURLConnection c = (HttpURLConnection) new URL("https://api.elevenlabs.io/v1/voices").openConnection();
+        c.setRequestProperty("xi-api-key", key);
+        c.setConnectTimeout(20000);
+        c.setReadTimeout(30000);
+        int code = c.getResponseCode();
+        String resp = readAll(code >= 400 ? c.getErrorStream() : c.getInputStream());
+        ArrayList<String> out = new ArrayList<String>();
+        if (code != 200) return out;
+        JSONArray arr = new JSONObject(resp).optJSONArray("voices");
+        if (arr == null) return out;
+        String[] order = {"generated", "cloned", "premade", ""};
+        for (String cat : order) {
+            for (int i = 0; i < arr.length() && out.size() < 6; i++) {
+                JSONObject v = arr.getJSONObject(i);
+                String vc = v.optString("category", "");
+                String id = v.optString("voice_id", "");
+                boolean match = cat.length() == 0 ? true : vc.equals(cat);
+                if (match && id.length() > 0 && !out.contains(id)) out.add(id);
+            }
+        }
+        return out;
+    }
+
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
@@ -416,42 +441,64 @@ public class MainActivity extends Activity {
                 public void run() {
                     try {
                         String key = prefs.getString("elkey", "");
-                        String voice = prefs.getString("elvoice", "");
-                        if (voice.length() == 0) voice = "21m00Tcm4TlvDq8ikWAM";
+                        String manual = prefs.getString("elvoice", "");
                         String model = prefs.getString("elmodel", "");
                         if (model.length() == 0) model = "eleven_v3";
                         String t = text.length() > 4500 ? text.substring(0, 4500) : text;
                         JSONObject body = new JSONObject();
                         body.put("text", t);
                         body.put("model_id", model);
-                        URL url = new URL("https://api.elevenlabs.io/v1/text-to-speech/" + voice + "?output_format=mp3_44100_64");
-                        HttpURLConnection c = (HttpURLConnection) url.openConnection();
-                        c.setRequestMethod("POST");
-                        c.setRequestProperty("xi-api-key", key);
-                        c.setRequestProperty("Content-Type", "application/json");
-                        c.setRequestProperty("Accept", "audio/mpeg");
-                        c.setConnectTimeout(20000);
-                        c.setReadTimeout(60000);
-                        c.setDoOutput(true);
-                        OutputStream o = c.getOutputStream();
-                        o.write(body.toString().getBytes(StandardCharsets.UTF_8));
-                        o.close();
-                        int code = c.getResponseCode();
-                        if (code != 200) {
-                            String resp = readAll(c.getErrorStream());
-                            elError("tts", "ElevenLabs ovoz xato " + code + ": " + (resp.length() > 300 ? resp.substring(0, 300) : resp));
+                        byte[] payload = body.toString().getBytes(StandardCharsets.UTF_8);
+
+                        ArrayList<String> cands = new ArrayList<String>();
+                        if (manual.length() > 0) {
+                            cands.add(manual);
+                        } else {
+                            String ok = prefs.getString("elvoice_ok", "");
+                            if (ok.length() > 0) cands.add(ok);
+                            else cands.addAll(listVoices(key));
+                        }
+                        if (cands.isEmpty()) {
+                            elError("tts", "ElevenLabs hisobida ovoz topilmadi. Saytda Voices bo'limidan ovoz qo'shing yoki Voice ID kiriting.");
                             return;
                         }
-                        File out = new File(getCacheDir(), "tts_" + gen + ".mp3");
-                        InputStream is = c.getInputStream();
-                        FileOutputStream fo = new FileOutputStream(out);
-                        byte[] buf = new byte[8192];
-                        int n;
-                        while ((n = is.read(buf)) > 0) fo.write(buf, 0, n);
-                        fo.close();
-                        is.close();
-                        if (gen != elGen) return;
-                        playFile(out.getAbsolutePath(), gen);
+                        String lastErr = "";
+                        for (String voice : cands) {
+                            if (gen != elGen) return;
+                            URL url = new URL("https://api.elevenlabs.io/v1/text-to-speech/" + voice + "?output_format=mp3_44100_64");
+                            HttpURLConnection c = (HttpURLConnection) url.openConnection();
+                            c.setRequestMethod("POST");
+                            c.setRequestProperty("xi-api-key", key);
+                            c.setRequestProperty("Content-Type", "application/json");
+                            c.setRequestProperty("Accept", "audio/mpeg");
+                            c.setConnectTimeout(20000);
+                            c.setReadTimeout(60000);
+                            c.setDoOutput(true);
+                            OutputStream o = c.getOutputStream();
+                            o.write(payload);
+                            o.close();
+                            int code = c.getResponseCode();
+                            if (code != 200) {
+                                String resp = readAll(c.getErrorStream());
+                                lastErr = "ElevenLabs ovoz xato " + code + ": " + (resp.length() > 300 ? resp.substring(0, 300) : resp);
+                                if (manual.length() == 0) prefs.edit().remove("elvoice_ok").apply();
+                                if (code == 402 || code == 404 || code == 422) continue;
+                                break;
+                            }
+                            if (manual.length() == 0) prefs.edit().putString("elvoice_ok", voice).apply();
+                            File out = new File(getCacheDir(), "tts_" + gen + ".mp3");
+                            InputStream is = c.getInputStream();
+                            FileOutputStream fo = new FileOutputStream(out);
+                            byte[] buf = new byte[8192];
+                            int n;
+                            while ((n = is.read(buf)) > 0) fo.write(buf, 0, n);
+                            fo.close();
+                            is.close();
+                            if (gen != elGen) return;
+                            playFile(out.getAbsolutePath(), gen);
+                            return;
+                        }
+                        elError("tts", lastErr);
                     } catch (Exception e) {
                         elError("tts", String.valueOf(e.getMessage()));
                     }
