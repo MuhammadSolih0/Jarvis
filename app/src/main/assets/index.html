@@ -77,7 +77,7 @@ body[data-state=listen] #mic{animation:ring 1s ease-out infinite}
 @keyframes ring{0%{box-shadow:0 0 0 0 rgba(255,184,46,.7)}100%{box-shadow:0 0 0 16px rgba(255,184,46,0)}}
 
 #set{position:fixed;inset:0;background:rgba(0,0,0,.8);display:none;align-items:center;justify-content:center;padding:16px;z-index:5}
-#set .box{background:#04121b;border:1px solid var(--c);box-shadow:0 0 24px rgba(41,216,255,.3);padding:16px;border-radius:8px;width:100%;max-width:420px}
+#set .box{max-height:92vh;overflow-y:auto;background:#04121b;border:1px solid var(--c);box-shadow:0 0 24px rgba(41,216,255,.3);padding:16px;border-radius:8px;width:100%;max-width:420px}
 #set b{font-family:ui-monospace,"Courier New",monospace;letter-spacing:3px;color:var(--c)}
 #set label{display:block;margin:12px 0 4px;color:var(--dim);font-size:12px;letter-spacing:1px}
 #set input{width:100%;padding:10px;border:1px solid rgba(41,216,255,.4);border-radius:6px;background:var(--bg);color:var(--tx);font:inherit}
@@ -98,7 +98,10 @@ body[data-state=listen] #mic{animation:ring 1s ease-out infinite}
   <b>SOZLAMALAR</b>
   <label>Gemini API kaliti</label><input id="key" type="password" autocomplete="off">
   <label>Model nomi</label><input id="model" type="text" autocomplete="off">
-  <label>Ovoz tili (masalan uz-UZ, ru-RU, en-US)</label><input id="lang" type="text" autocomplete="off">
+  <label>Ovoz tili (masalan uz-UZ, ru-RU, en-US) - faqat Google ovozi uchun</label><input id="lang" type="text" autocomplete="off">
+  <label>ElevenLabs API kaliti (bo'sh bo'lsa Google ovozi ishlaydi)</label><input id="elkey" type="password" autocomplete="off">
+  <label>ElevenLabs Voice ID (bo'sh bo'lsa standart)</label><input id="elvoice" type="text" autocomplete="off">
+  <label>ElevenLabs ovoz modeli (bo'sh bo'lsa eleven_v3)</label><input id="elmodel" type="text" autocomplete="off">
   <div class="row"><button id="bCancel">BEKOR</button><button id="bSave" class="p">SAQLASH</button></div>
 </div></div>
 <script>
@@ -106,7 +109,7 @@ var SYS = "Sen J.A.R.V.I.S.san, Tony Starkning aqlli sun'iy intellekt yordamchis
 var $ = function(id){ return document.getElementById(id); };
 var hist = [];
 try { hist = JSON.parse(Native.get("hist", "[]")); } catch (e) { hist = []; }
-var pending = {}, busy = false, seq = 0, ttsWarned = false, cont = Native.get("cont", "0") === "1";
+var pending = {}, busy = false, seq = 0, ttsWarned = false, cont = Native.get("cont", "0") === "1", wasSpeaking = false, lastSay = "";
 
 function reactor() {
   var sp = "";
@@ -165,7 +168,7 @@ function add(role, text, isErr) {
   var b = document.createElement("div");
   b.className = "b" + (isErr ? " err" : "");
   b.textContent = text;
-  if (role === "model") b.onclick = function(){ if (!b.classList.contains("err")) Native.speak(clean(b.textContent), getLang()); };
+  if (role === "model") b.onclick = function(){ if (!b.classList.contains("err")) say(clean(b.textContent)); };
   w.appendChild(tag); w.appendChild(b);
   $("msgs").appendChild(w);
   $("msgs").scrollTop = $("msgs").scrollHeight;
@@ -216,20 +219,30 @@ async function send() {
   busy = false;
   setState("idle");
   $("msgs").scrollTop = $("msgs").scrollHeight;
-  if (out && speakOn()) Native.speak(clean(out), getLang());
+  if (out && speakOn()) say(clean(out));
   else if (out) autoListen();
   else if (cont) stopCont();
 }
+
+function elOn() { return !!Native.get("elkey", ""); }
+function say(t) {
+  lastSay = t;
+  if (elOn()) Native.speakEL(t); else Native.speak(t, getLang());
+}
+function startListen() {
+  if (elOn()) Native.listenEL(); else Native.listen(getLang());
+}
+function stateIs(s) { return document.body.getAttribute("data-state") === s; }
 
 /* uzluksiz suhbat */
 function refreshCont() { $("bCont").className = "hb" + (cont ? " on" : ""); }
 function autoListen() {
   if (!cont || busy) return;
-  if (document.body.getAttribute("data-state") === "listen") return;
+  if (stateIs("listen")) return;
   setTimeout(function(){
-    if (!cont || busy || document.body.getAttribute("data-state") === "listen") return;
+    if (!cont || busy || stateIs("listen") || stateIs("speak")) return;
     setState("listen");
-    Native.listen(getLang());
+    startListen();
   }, 500);
 }
 function stopCont() { cont = false; Native.set("cont", "0"); refreshCont(); }
@@ -237,7 +250,8 @@ function stopCont() { cont = false; Native.set("cont", "0"); refreshCont(); }
 /* native callbacks */
 function onSpeakState(s) {
   setState(s === "start" ? "speak" : (busy ? "think" : "idle"));
-  if (s === "done") autoListen();
+  if (s === "start") wasSpeaking = true;
+  if (s === "done" && wasSpeaking) { wasSpeaking = false; autoListen(); }
 }
 function onTtsError(kind) {
   setState(busy ? "think" : "idle");
@@ -260,6 +274,19 @@ function onVoiceError(kind) {
   setState("idle");
   if (cont) stopCont();
   if (kind === "no_service") add("model", "Telefonda ovoz tanish xizmati topilmadi (Google ilovasi kerak).", true);
+  if (kind === "perm") add("model", "Mikrofon ruxsati berilmadi. Telefon sozlamalari > Ilovalar > Jarvis > Ruxsatlar > Mikrofon ni yoqing.", true);
+}
+function onElError(kind, b64) {
+  var msg = new TextDecoder().decode(Uint8Array.from(atob(b64), function(c){ return c.charCodeAt(0); }));
+  wasSpeaking = false;
+  setState(busy ? "think" : "idle");
+  if (kind === "stt") {
+    if (cont) stopCont();
+    add("model", msg, true);
+    return;
+  }
+  add("model", msg + (lastSay ? "\nGoogle ovoziga o'tildi." : ""), true);
+  if (lastSay) Native.speak(lastSay, getLang());
 }
 
 /* ui */
@@ -268,6 +295,9 @@ function openSet() {
   $("key").value = Native.get("key", "");
   $("model").value = getModel();
   $("lang").value = getLang();
+  $("elkey").value = Native.get("elkey", "");
+  $("elvoice").value = Native.get("elvoice", "");
+  $("elmodel").value = Native.get("elmodel", "");
   $("set").style.display = "flex";
 }
 $("bSpk").onclick = function(){
@@ -279,13 +309,16 @@ $("bCont").onclick = function(){
   cont = !cont;
   Native.set("cont", cont ? "1" : "0");
   refreshCont();
-  if (cont) {
-    if (!Native.get("key", "")) { cont = false; refreshCont(); openSet(); return; }
-    if (!speakOn()) { Native.set("speak", "1"); refreshSpk(); }
-    Native.stopSpeak();
-    setState("listen");
-    Native.listen(getLang());
+  if (!cont) {
+    if (stateIs("listen") && elOn()) Native.stopListen(false);
+    if (stateIs("listen")) setState("idle");
+    return;
   }
+  if (!Native.get("key", "")) { cont = false; Native.set("cont", "0"); refreshCont(); openSet(); return; }
+  if (!speakOn()) { Native.set("speak", "1"); refreshSpk(); }
+  Native.stopSpeak();
+  setState("listen");
+  startListen();
 };
 $("bSet").onclick = openSet;
 $("bCancel").onclick = function(){ $("set").style.display = "none"; };
@@ -293,6 +326,9 @@ $("bSave").onclick = function(){
   Native.set("key", $("key").value.trim());
   Native.set("model", $("model").value.trim());
   Native.set("lang", $("lang").value.trim());
+  Native.set("elkey", $("elkey").value.trim());
+  Native.set("elvoice", $("elvoice").value.trim());
+  Native.set("elmodel", $("elmodel").value.trim());
   ttsWarned = false;
   $("set").style.display = "none";
 };
@@ -301,9 +337,10 @@ $("bClear").onclick = function(){
 };
 $("go").onclick = send;
 $("mic").onclick = function(){
+  if (stateIs("listen") && elOn()) { Native.stopListen(true); setState("think"); return; }
   Native.stopSpeak();
   setState("listen");
-  Native.listen(getLang());
+  startListen();
 };
 
 refreshSpk();

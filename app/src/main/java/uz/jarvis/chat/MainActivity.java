@@ -4,7 +4,16 @@ import android.app.Activity;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.Manifest;
+import android.content.pm.PackageManager;
+import android.media.AudioAttributes;
+import android.media.MediaPlayer;
+import android.media.MediaRecorder;
+import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.SystemClock;
 import android.speech.RecognizerIntent;
 import android.speech.tts.TextToSpeech;
 import android.speech.tts.UtteranceProgressListener;
@@ -13,7 +22,13 @@ import android.webkit.JavascriptInterface;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 
+import org.json.JSONObject;
+
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
@@ -31,6 +46,230 @@ public class MainActivity extends Activity {
     private TextToSpeech tts;
     private boolean ttsReady = false;
     private String lastUtt = "";
+
+    // ElevenLabs
+    private static final int REQ_MIC = 202;
+    private final Handler h = new Handler(Looper.getMainLooper());
+    private MediaPlayer player;
+    private int elGen = 0;
+    private MediaRecorder rec;
+    private File recFile;
+    private boolean recActive = false, recSpoke = false, pendingListen = false;
+    private long recStart, lastLoud;
+    private final Runnable poll = new Runnable() {
+        @Override
+        public void run() {
+            if (!recActive) return;
+            int amp = 0;
+            try {
+                amp = rec.getMaxAmplitude();
+            } catch (Exception e) {
+                // ignore
+            }
+            long now = SystemClock.elapsedRealtime();
+            if (amp > 2200) {
+                recSpoke = true;
+                lastLoud = now;
+            }
+            boolean done = false;
+            if (recSpoke && now - lastLoud > 1500) done = true;
+            else if (!recSpoke && now - recStart > 8000) done = true;
+            else if (now - recStart > 30000) done = true;
+            if (done) finishRec(true, false);
+            else h.postDelayed(this, 100);
+        }
+    };
+
+    private String b64(String t) {
+        return Base64.encodeToString(String.valueOf(t).getBytes(StandardCharsets.UTF_8), Base64.NO_WRAP);
+    }
+
+    private void elError(String kind, String msg) {
+        js("onElError('" + kind + "','" + b64(msg) + "')");
+    }
+
+    private String readAll(InputStream is) throws Exception {
+        if (is == null) return "";
+        StringBuilder sb = new StringBuilder();
+        BufferedReader r = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8));
+        String line;
+        while ((line = r.readLine()) != null) sb.append(line).append('\n');
+        r.close();
+        return sb.toString();
+    }
+
+    private void stopPlayer() {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                if (player != null) {
+                    try {
+                        player.stop();
+                    } catch (Exception e) {
+                        // ignore
+                    }
+                    try {
+                        player.release();
+                    } catch (Exception e) {
+                        // ignore
+                    }
+                    player = null;
+                }
+            }
+        });
+    }
+
+    private void playFile(final String path, final int gen) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                if (gen != elGen) return;
+                try {
+                    if (player != null) {
+                        try { player.release(); } catch (Exception e) { /* ignore */ }
+                    }
+                    final MediaPlayer mp = new MediaPlayer();
+                    player = mp;
+                    mp.setAudioAttributes(new AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_MEDIA)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build());
+                    mp.setDataSource(path);
+                    mp.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
+                        @Override
+                        public void onPrepared(MediaPlayer m) {
+                            if (gen != elGen || player != mp) return;
+                            m.start();
+                            js("onSpeakState('start')");
+                        }
+                    });
+                    mp.setOnCompletionListener(new MediaPlayer.OnCompletionListener() {
+                        @Override
+                        public void onCompletion(MediaPlayer m) {
+                            if (player == mp) {
+                                try { mp.release(); } catch (Exception e) { /* ignore */ }
+                                player = null;
+                            }
+                            if (gen == elGen) js("onSpeakState('done')");
+                        }
+                    });
+                    mp.setOnErrorListener(new MediaPlayer.OnErrorListener() {
+                        @Override
+                        public boolean onError(MediaPlayer m, int what, int extra) {
+                            if (gen == elGen) elError("play", "Audio o'ynatib bo'lmadi (" + what + ")");
+                            return true;
+                        }
+                    });
+                    mp.prepareAsync();
+                } catch (Exception e) {
+                    elError("play", String.valueOf(e.getMessage()));
+                }
+            }
+        });
+    }
+
+    private void startRec() {
+        try {
+            recFile = new File(getCacheDir(), "rec.m4a");
+            rec = Build.VERSION.SDK_INT >= 31 ? new MediaRecorder(this) : new MediaRecorder();
+            rec.setAudioSource(MediaRecorder.AudioSource.MIC);
+            rec.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
+            rec.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
+            rec.setAudioEncodingBitRate(64000);
+            rec.setAudioSamplingRate(16000);
+            rec.setOutputFile(recFile.getAbsolutePath());
+            rec.prepare();
+            rec.start();
+            long now = SystemClock.elapsedRealtime();
+            recActive = true;
+            recSpoke = false;
+            recStart = now;
+            lastLoud = now;
+            h.postDelayed(poll, 100);
+        } catch (Exception e) {
+            recActive = false;
+            try { if (rec != null) rec.release(); } catch (Exception x) { /* ignore */ }
+            rec = null;
+            elError("stt", "Mikrofonni ochib bo'lmadi: " + e.getMessage());
+        }
+    }
+
+    private void finishRec(boolean upload, boolean manual) {
+        if (!recActive) return;
+        recActive = false;
+        h.removeCallbacks(poll);
+        boolean ok = true;
+        try {
+            rec.stop();
+        } catch (RuntimeException e) {
+            ok = false;
+        }
+        try { rec.release(); } catch (Exception e) { /* ignore */ }
+        rec = null;
+        if (!upload) return;
+        if (!ok || !(recSpoke || manual)) {
+            js("onVoiceError('silence')");
+            return;
+        }
+        transcribe();
+    }
+
+    private void transcribe() {
+        final File f = recFile;
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    String key = prefs.getString("elkey", "");
+                    String model = prefs.getString("stt_model", "scribe_v1");
+                    String bd = "----jv" + System.currentTimeMillis();
+                    HttpURLConnection c = (HttpURLConnection) new URL("https://api.elevenlabs.io/v1/speech-to-text").openConnection();
+                    c.setRequestMethod("POST");
+                    c.setRequestProperty("xi-api-key", key);
+                    c.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + bd);
+                    c.setConnectTimeout(20000);
+                    c.setReadTimeout(60000);
+                    c.setDoOutput(true);
+                    OutputStream o = c.getOutputStream();
+                    String[][] fields = {{"model_id", model}, {"tag_audio_events", "false"}};
+                    for (String[] kv : fields) {
+                        o.write(("--" + bd + "\r\nContent-Disposition: form-data; name=\"" + kv[0] + "\"\r\n\r\n" + kv[1] + "\r\n").getBytes(StandardCharsets.UTF_8));
+                    }
+                    o.write(("--" + bd + "\r\nContent-Disposition: form-data; name=\"file\"; filename=\"rec.m4a\"\r\nContent-Type: audio/mp4\r\n\r\n").getBytes(StandardCharsets.UTF_8));
+                    FileInputStream fi = new FileInputStream(f);
+                    byte[] buf = new byte[8192];
+                    int n;
+                    while ((n = fi.read(buf)) > 0) o.write(buf, 0, n);
+                    fi.close();
+                    o.write(("\r\n--" + bd + "--\r\n").getBytes(StandardCharsets.UTF_8));
+                    o.close();
+                    int code = c.getResponseCode();
+                    String resp = readAll(code >= 400 ? c.getErrorStream() : c.getInputStream());
+                    if (code != 200) {
+                        elError("stt", "ElevenLabs STT xato " + code + ": " + (resp.length() > 300 ? resp.substring(0, 300) : resp));
+                        return;
+                    }
+                    String text = new JSONObject(resp).optString("text", "").trim();
+                    if (text.length() == 0) {
+                        js("onVoiceError('empty')");
+                        return;
+                    }
+                    js("onVoice('" + b64(text) + "')");
+                } catch (Exception e) {
+                    elError("stt", String.valueOf(e.getMessage()));
+                }
+            }
+        }).start();
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode != REQ_MIC) return;
+        boolean granted = grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED;
+        if (granted && pendingListen) startRec();
+        else js("onVoiceError('perm')");
+        pendingListen = false;
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -161,8 +400,89 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public void stopSpeak() {
+            elGen++;
+            stopPlayer();
             if (tts != null && ttsReady) tts.stop();
             js("onSpeakState('done')");
+        }
+
+        @JavascriptInterface
+        public void speakEL(final String text) {
+            final int gen = ++elGen;
+            stopPlayer();
+            if (tts != null && ttsReady) tts.stop();
+            new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        String key = prefs.getString("elkey", "");
+                        String voice = prefs.getString("elvoice", "");
+                        if (voice.length() == 0) voice = "21m00Tcm4TlvDq8ikWAM";
+                        String model = prefs.getString("elmodel", "");
+                        if (model.length() == 0) model = "eleven_v3";
+                        String t = text.length() > 4500 ? text.substring(0, 4500) : text;
+                        JSONObject body = new JSONObject();
+                        body.put("text", t);
+                        body.put("model_id", model);
+                        URL url = new URL("https://api.elevenlabs.io/v1/text-to-speech/" + voice + "?output_format=mp3_44100_64");
+                        HttpURLConnection c = (HttpURLConnection) url.openConnection();
+                        c.setRequestMethod("POST");
+                        c.setRequestProperty("xi-api-key", key);
+                        c.setRequestProperty("Content-Type", "application/json");
+                        c.setRequestProperty("Accept", "audio/mpeg");
+                        c.setConnectTimeout(20000);
+                        c.setReadTimeout(60000);
+                        c.setDoOutput(true);
+                        OutputStream o = c.getOutputStream();
+                        o.write(body.toString().getBytes(StandardCharsets.UTF_8));
+                        o.close();
+                        int code = c.getResponseCode();
+                        if (code != 200) {
+                            String resp = readAll(c.getErrorStream());
+                            elError("tts", "ElevenLabs ovoz xato " + code + ": " + (resp.length() > 300 ? resp.substring(0, 300) : resp));
+                            return;
+                        }
+                        File out = new File(getCacheDir(), "tts_" + gen + ".mp3");
+                        InputStream is = c.getInputStream();
+                        FileOutputStream fo = new FileOutputStream(out);
+                        byte[] buf = new byte[8192];
+                        int n;
+                        while ((n = is.read(buf)) > 0) fo.write(buf, 0, n);
+                        fo.close();
+                        is.close();
+                        if (gen != elGen) return;
+                        playFile(out.getAbsolutePath(), gen);
+                    } catch (Exception e) {
+                        elError("tts", String.valueOf(e.getMessage()));
+                    }
+                }
+            }).start();
+        }
+
+        @JavascriptInterface
+        public void listenEL() {
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    if (recActive) return;
+                    if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                        pendingListen = true;
+                        requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, REQ_MIC);
+                        return;
+                    }
+                    startRec();
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public void stopListen(final boolean send) {
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    finishRec(send, true);
+                }
+            });
         }
 
         @JavascriptInterface
@@ -221,6 +541,9 @@ public class MainActivity extends Activity {
     protected void onPause() {
         super.onPause();
         if (tts != null && ttsReady) tts.stop();
+        elGen++;
+        stopPlayer();
+        if (recActive) finishRec(false, false);
     }
 
     @Override
