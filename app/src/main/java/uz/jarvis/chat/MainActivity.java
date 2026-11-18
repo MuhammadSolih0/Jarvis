@@ -1,8 +1,11 @@
 package uz.jarvis.chat;
 
 import android.app.Activity;
+import android.content.ActivityNotFoundException;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.Bundle;
+import android.speech.RecognizerIntent;
 import android.util.Base64;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebSettings;
@@ -15,10 +18,12 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 
 public class MainActivity extends Activity {
     private WebView web;
     private SharedPreferences prefs;
+    private static final int REQ_VOICE = 101;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -52,6 +57,25 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void set(String key, String value) {
             prefs.edit().putString(key, value).apply();
+        }
+
+
+        @JavascriptInterface
+        public void listen(final String lang) {
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        Intent i = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+                        i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+                        i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, lang);
+                        i.putExtra(RecognizerIntent.EXTRA_PROMPT, "Gapiring...");
+                        startActivityForResult(i, REQ_VOICE);
+                    } catch (ActivityNotFoundException e) {
+                        web.evaluateJavascript("onVoiceError('no_service')", null);
+                    }
+                }
+            });
         }
 
         @JavascriptInterface
@@ -89,6 +113,21 @@ public class MainActivity extends Activity {
                 }
             }).start();
         }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != REQ_VOICE) return;
+        if (resultCode == RESULT_OK && data != null) {
+            ArrayList<String> r = data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
+            if (r != null && !r.isEmpty()) {
+                String b64 = Base64.encodeToString(r.get(0).getBytes(StandardCharsets.UTF_8), Base64.NO_WRAP);
+                web.evaluateJavascript("onVoice('" + b64 + "')", null);
+                return;
+            }
+        }
+        web.evaluateJavascript("onVoiceError('cancel')", null);
     }
 
     @Override

@@ -19,6 +19,7 @@ header button{background:none;border:0;color:var(--tx);font-size:20px;padding:4p
 .err{color:#ff8a8a}
 #bar{display:flex;gap:8px;padding:10px;background:var(--card)}
 #inp{flex:1;resize:none;max-height:120px;border:0;border-radius:12px;padding:10px;background:var(--bg);color:var(--tx);font:inherit}
+#mic{border:0;border-radius:12px;padding:0 14px;background:var(--bg);color:var(--tx);font-size:18px}
 #go{border:0;border-radius:12px;padding:0 16px;background:var(--me);color:#fff;font-size:18px}
 #set{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;align-items:center;justify-content:center;padding:16px}
 #set .box{background:var(--card);padding:16px;border-radius:14px;width:100%;max-width:420px}
@@ -31,7 +32,7 @@ header button{background:none;border:0;color:var(--tx);font-size:20px;padding:4p
 <body>
 <header><b>Jarvis</b><span><button id="bClear">🗑</button><button id="bSet">⚙</button></span></header>
 <div id="msgs"></div>
-<div id="bar"><textarea id="inp" rows="1" placeholder="Xabar yozing..."></textarea><button id="go">➤</button></div>
+<div id="bar"><textarea id="inp" rows="1" placeholder="Xabar yozing..."></textarea><button id="mic">🎤</button><button id="go">➤</button></div>
 <div id="set"><div class="box">
 <b>Sozlamalar</b>
 <label>Gemini API kaliti</label><input id="key" type="password" autocomplete="off">
@@ -126,6 +127,16 @@ $("bSave").onclick = function(){
 };
 $("bClear").onclick = function(){ hist = []; save(); $("msgs").innerHTML = ""; };
 $("go").onclick = send;
+function onVoice(b64) {
+  var text = new TextDecoder().decode(Uint8Array.from(atob(b64), function(c){ return c.charCodeAt(0); }));
+  $("inp").value = text;
+  send();
+}
+function onVoiceError(kind) {
+  if (kind === "no_service") add("model", "Telefonda ovoz tanish xizmati topilmadi (Google ilovasi kerak).", true);
+}
+$("mic").onclick = function(){ Native.listen("uz-UZ"); };
+
 
 hist.forEach(function(m){ add(m.role, m.parts.map(function(p){ return p.text; }).join("")); });
 if (!Native.get("key", "")) openSet();
