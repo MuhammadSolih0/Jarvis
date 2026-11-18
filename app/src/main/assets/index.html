@@ -3,48 +3,138 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Jarvis</title>
+<title>J.A.R.V.I.S</title>
 <style>
-:root{--bg:#0f1115;--card:#1a1d24;--me:#2b5cff;--tx:#e8eaf0;--mut:#8b93a5}
-*{box-sizing:border-box}
-html,body{height:100%;margin:0;background:var(--bg);color:var(--tx);font-family:system-ui,sans-serif}
-body{display:flex;flex-direction:column}
-header{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;background:var(--card)}
-header b{font-size:18px}
-header button{background:none;border:0;color:var(--tx);font-size:20px;padding:4px 8px}
-#msgs{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px}
-.m{max-width:88%;padding:10px 12px;border-radius:14px;white-space:pre-wrap;word-wrap:break-word;line-height:1.4}
-.user{align-self:flex-end;background:var(--me)}
-.model{align-self:flex-start;background:var(--card)}
-.err{color:#ff8a8a}
-#bar{display:flex;gap:8px;padding:10px;background:var(--card)}
-#inp{flex:1;resize:none;max-height:120px;border:0;border-radius:12px;padding:10px;background:var(--bg);color:var(--tx);font:inherit}
-#mic{border:0;border-radius:12px;padding:0 14px;background:var(--bg);color:var(--tx);font-size:18px}
-#go{border:0;border-radius:12px;padding:0 16px;background:var(--me);color:#fff;font-size:18px}
-#set{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;align-items:center;justify-content:center;padding:16px}
-#set .box{background:var(--card);padding:16px;border-radius:14px;width:100%;max-width:420px}
-#set label{display:block;margin:10px 0 4px;color:var(--mut);font-size:13px}
-#set input{width:100%;padding:10px;border:0;border-radius:10px;background:var(--bg);color:var(--tx);font:inherit}
-#set .row{display:flex;gap:8px;margin-top:14px}
-#set button{flex:1;padding:10px;border:0;border-radius:10px;font-size:15px}
+:root{--c:#29d8ff;--gold:#ffb82e;--bg:#02070d;--panel:rgba(8,28,40,.85);--tx:#cdeeff;--dim:#5f8da0}
+body[data-state=listen]{--c:var(--gold)}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;margin:0;color:var(--tx);font-family:system-ui,sans-serif;
+  background:radial-gradient(ellipse at 50% 0%,#06222f 0%,var(--bg) 70%)}
+body{display:flex;flex-direction:column;position:relative}
+body::before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.35;
+  background-image:linear-gradient(rgba(41,216,255,.07) 1px,transparent 1px),linear-gradient(90deg,rgba(41,216,255,.07) 1px,transparent 1px);
+  background-size:32px 32px}
+.mono{font-family:ui-monospace,"Courier New",monospace}
+
+header{position:relative;display:flex;align-items:center;gap:12px;padding:10px 12px;
+  border-bottom:1px solid rgba(41,216,255,.4);background:linear-gradient(180deg,rgba(8,28,40,.95),rgba(2,7,13,.6));
+  box-shadow:0 2px 18px rgba(41,216,255,.18)}
+#hr{width:46px;height:46px;flex:none}
+.ttl{flex:1;min-width:0}
+.ttl b{display:block;font-family:ui-monospace,"Courier New",monospace;font-size:18px;letter-spacing:5px;color:var(--c);
+  text-shadow:0 0 10px var(--c)}
+#stat{font-family:ui-monospace,"Courier New",monospace;font-size:10px;letter-spacing:2px;color:var(--dim)}
+.hb{width:38px;height:38px;border:1px solid rgba(41,216,255,.5);background:rgba(41,216,255,.06);color:var(--tx);
+  border-radius:6px;font-size:17px;margin-left:4px;box-shadow:inset 0 0 8px rgba(41,216,255,.15)}
+.hb:active{background:rgba(41,216,255,.25)}
+
+/* arc reactor */
+.rx{width:100%;height:100%;color:var(--c);filter:drop-shadow(0 0 5px var(--c))}
+.rx .r1,.rx .r2,.rx .r3,.rx .core{transform-origin:50px 50px}
+.rx .r1{animation:spin 16s linear infinite}
+.rx .r2{animation:spin 11s linear infinite reverse}
+.rx .r3{animation:spin 24s linear infinite}
+.rx .core{animation:pulse 3s ease-in-out infinite}
+body[data-state=think] .rx .r1{animation-duration:2.2s}
+body[data-state=think] .rx .r2{animation-duration:1.6s}
+body[data-state=think] .rx .r3{animation-duration:3s}
+body[data-state=speak] .rx .core{animation:beat .55s ease-in-out infinite}
+body[data-state=listen] .rx .core{animation:beat .9s ease-in-out infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes pulse{0%,100%{opacity:.55;transform:scale(.92)}50%{opacity:1;transform:scale(1.05)}}
+@keyframes beat{0%,100%{opacity:.6;transform:scale(.85)}50%{opacity:1;transform:scale(1.3)}}
+
+#msgs{position:relative;flex:1;overflow-y:auto;padding:14px 12px;display:flex;flex-direction:column;gap:12px}
+#hero{margin:auto;text-align:center;padding:10px}
+#hero .big{width:170px;height:170px;margin:0 auto 14px}
+#hero p{margin:4px 0;font-family:ui-monospace,"Courier New",monospace;letter-spacing:2px;font-size:13px;color:var(--dim)}
+#hero p.h{color:var(--c);font-size:15px;text-shadow:0 0 8px var(--c)}
+
+.w{max-width:90%;display:flex;flex-direction:column;gap:3px}
+.w.user{align-self:flex-end;align-items:flex-end}
+.w.model{align-self:flex-start}
+.tag{font-family:ui-monospace,"Courier New",monospace;font-size:10px;letter-spacing:3px;color:var(--dim)}
+.w.model .tag{color:var(--c)}
+.w.user .tag{color:var(--gold)}
+.b{padding:10px 12px;line-height:1.45;white-space:pre-wrap;word-wrap:break-word;border:1px solid;border-radius:4px;
+  background:var(--panel)}
+.w.model .b{border-color:rgba(41,216,255,.55);box-shadow:0 0 12px rgba(41,216,255,.18),inset 0 0 14px rgba(41,216,255,.06);
+  border-left-width:3px}
+.w.user .b{border-color:rgba(255,184,46,.6);box-shadow:0 0 12px rgba(255,184,46,.15),inset 0 0 14px rgba(255,184,46,.05);
+  border-right-width:3px;color:#ffe9c2}
+.b.err{color:#ff8a8a;border-color:#ff5252;box-shadow:0 0 12px rgba(255,82,82,.25)}
+
+#bar{position:relative;display:flex;gap:8px;padding:10px;border-top:1px solid rgba(41,216,255,.4);
+  background:linear-gradient(0deg,rgba(8,28,40,.95),rgba(2,7,13,.6));box-shadow:0 -2px 18px rgba(41,216,255,.15)}
+#inp{flex:1;resize:none;max-height:110px;border:1px solid rgba(41,216,255,.5);border-radius:6px;padding:10px;
+  background:rgba(2,7,13,.8);color:var(--tx);font:inherit;outline:none}
+#inp:focus{box-shadow:0 0 10px rgba(41,216,255,.4)}
+#mic,#go{width:46px;border-radius:50%;border:1px solid var(--c);background:rgba(41,216,255,.08);color:var(--c);
+  font-size:19px;box-shadow:0 0 10px rgba(41,216,255,.3)}
+#go{border-radius:8px}
+body[data-state=listen] #mic{animation:ring 1s ease-out infinite}
+@keyframes ring{0%{box-shadow:0 0 0 0 rgba(255,184,46,.7)}100%{box-shadow:0 0 0 16px rgba(255,184,46,0)}}
+
+#set{position:fixed;inset:0;background:rgba(0,0,0,.8);display:none;align-items:center;justify-content:center;padding:16px;z-index:5}
+#set .box{background:#04121b;border:1px solid var(--c);box-shadow:0 0 24px rgba(41,216,255,.3);padding:16px;border-radius:8px;width:100%;max-width:420px}
+#set b{font-family:ui-monospace,"Courier New",monospace;letter-spacing:3px;color:var(--c)}
+#set label{display:block;margin:12px 0 4px;color:var(--dim);font-size:12px;letter-spacing:1px}
+#set input{width:100%;padding:10px;border:1px solid rgba(41,216,255,.4);border-radius:6px;background:var(--bg);color:var(--tx);font:inherit}
+#set .row{display:flex;gap:8px;margin-top:16px}
+#set button{flex:1;padding:10px;border-radius:6px;font-size:14px;border:1px solid var(--c);background:transparent;color:var(--c)}
+#set button.p{background:rgba(41,216,255,.2)}
 </style>
 </head>
-<body>
-<header><b>Jarvis</b><span><button id="bClear">🗑</button><button id="bSet">⚙</button></span></header>
+<body data-state="idle">
+<header>
+  <div id="hr"></div>
+  <div class="ttl"><b>J.A.R.V.I.S</b><span id="stat">TIZIM FAOL</span></div>
+  <button class="hb" id="bSpk">🔊</button><button class="hb" id="bClear">🗑</button><button class="hb" id="bSet">⚙</button>
+</header>
 <div id="msgs"></div>
-<div id="bar"><textarea id="inp" rows="1" placeholder="Xabar yozing..."></textarea><button id="mic">🎤</button><button id="go">➤</button></div>
+<div id="bar"><textarea id="inp" rows="1" placeholder="Buyruq bering..."></textarea><button id="mic">🎤</button><button id="go">➤</button></div>
 <div id="set"><div class="box">
-<b>Sozlamalar</b>
-<label>Gemini API kaliti</label><input id="key" type="password" autocomplete="off">
-<label>Model nomi</label><input id="model" type="text" autocomplete="off">
-<div class="row"><button id="bCancel">Bekor</button><button id="bSave" style="background:var(--me);color:#fff">Saqlash</button></div>
+  <b>SOZLAMALAR</b>
+  <label>Gemini API kaliti</label><input id="key" type="password" autocomplete="off">
+  <label>Model nomi</label><input id="model" type="text" autocomplete="off">
+  <label>Ovoz tili (masalan uz-UZ, ru-RU, en-US)</label><input id="lang" type="text" autocomplete="off">
+  <div class="row"><button id="bCancel">BEKOR</button><button id="bSave" class="p">SAQLASH</button></div>
 </div></div>
 <script>
-var SYS = "Sen Jarvis ismli yordamchisan. Foydalanuvchi qaysi tilda yozsa, shu tilda qisqa va aniq javob ber.";
+var SYS = "Sen Jarvis ismli ovozli yordamchisan. Foydalanuvchi qaysi tilda yozsa, shu tilda qisqa, aniq va og'zaki nutqqa mos javob ber. Markdown belgilarini (yulduzcha, #) ishlatma.";
 var $ = function(id){ return document.getElementById(id); };
 var hist = [];
 try { hist = JSON.parse(Native.get("hist", "[]")); } catch (e) { hist = []; }
-var pending = {}, busy = false, seq = 0;
+var pending = {}, busy = false, seq = 0, ttsWarned = false;
+
+function reactor() {
+  var sp = "";
+  for (var a = 0; a < 360; a += 45) sp += '<rect x="48.5" y="13" width="3" height="11" transform="rotate(' + a + ' 50 50)"/>';
+  return '<svg viewBox="0 0 100 100" class="rx">' +
+    '<circle class="r1" cx="50" cy="50" r="46" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="4 5"/>' +
+    '<circle class="r2" cx="50" cy="50" r="38" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="22 10"/>' +
+    '<circle cx="50" cy="50" r="29" fill="none" stroke="currentColor" stroke-width="1"/>' +
+    '<g class="r3" fill="currentColor">' + sp + '</g>' +
+    '<circle cx="50" cy="50" r="20" fill="none" stroke="currentColor" stroke-width="1.5" opacity=".6"/>' +
+    '<circle class="core" cx="50" cy="50" r="12" fill="currentColor"/>' +
+    '</svg>';
+}
+$("hr").innerHTML = reactor();
+
+var STAT = { idle: "TIZIM FAOL", think: "O'YLAYAPMAN...", speak: "GAPIRYAPMAN...", listen: "TINGLAYAPMAN..." };
+function setState(s) {
+  document.body.setAttribute("data-state", s);
+  $("stat").textContent = STAT[s] || "";
+}
+
+function getModel() { return Native.get("model", "") || "gemini-3.5-flash-lite"; }
+function getLang() { return Native.get("lang", "") || "uz-UZ"; }
+function speakOn() { return Native.get("speak", "1") === "1"; }
+function save() { Native.set("hist", JSON.stringify(hist)); }
+function sleep(ms) { return new Promise(function(r){ setTimeout(r, ms); }); }
+function clean(t) {
+  return t.replace(/[*_#`>~|]/g, "").replace(/\s*\n+\s*/g, ". ").replace(/\s+/g, " ").trim();
+}
 
 function onNativeResult(id, status, b64) {
   var text = new TextDecoder().decode(Uint8Array.from(atob(b64), function(c){ return c.charCodeAt(0); }));
@@ -58,28 +148,41 @@ function callNative(model, body) {
     Native.ask(id, model, JSON.stringify(body));
   });
 }
-function sleep(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
 
-function add(role, text, isErr) {
-  var d = document.createElement("div");
-  d.className = "m " + role + (isErr ? " err" : "");
-  d.textContent = text;
-  $("msgs").appendChild(d);
-  $("msgs").scrollTop = $("msgs").scrollHeight;
-  return d;
+function showHero() {
+  var h = document.createElement("div");
+  h.id = "hero";
+  h.innerHTML = '<div class="big">' + reactor() + '</div><p class="h">SALOM. MEN JARVISMAN.</p><p>BUYRUQ BERING YOKI 🎤 NI BOSING</p>';
+  $("msgs").appendChild(h);
 }
-function save() { Native.set("hist", JSON.stringify(hist)); }
-function getModel() { return Native.get("model", "") || "gemini-3.5-flash-lite"; }
+function add(role, text, isErr) {
+  var hero = $("hero"); if (hero) hero.remove();
+  var w = document.createElement("div");
+  w.className = "w " + role;
+  var tag = document.createElement("div");
+  tag.className = "tag"; tag.textContent = role === "user" ? "SIZ" : "JARVIS";
+  var b = document.createElement("div");
+  b.className = "b" + (isErr ? " err" : "");
+  b.textContent = text;
+  if (role === "model") b.onclick = function(){ if (!b.classList.contains("err")) Native.speak(clean(b.textContent), getLang()); };
+  w.appendChild(tag); w.appendChild(b);
+  $("msgs").appendChild(w);
+  $("msgs").scrollTop = $("msgs").scrollHeight;
+  return b;
+}
 
 async function send() {
   var t = $("inp").value.trim();
   if (!t || busy) return;
-  if (!Native.get("key", "")) { openSet(); return; }
+  if (!Native.get("key", "")) { openSet(); setState("idle"); return; }
+  Native.stopSpeak();
   $("inp").value = "";
   add("user", t);
   hist.push({ role: "user", parts: [{ text: t }] });
-  var el = add("model", "…");
+  var el = add("model", "...");
   busy = true;
+  setState("think");
+  var out = "";
   try {
     var ctx = hist.slice(-30);
     while (ctx.length && ctx[0].role !== "user") ctx.shift();
@@ -88,7 +191,7 @@ async function send() {
     for (var i = 0; i < 3; i++) {
       r = await callNative(getModel(), body);
       if (r.status !== 503 && r.status !== 429) break;
-      el.textContent = "Server band, qayta urinilmoqda… (" + (i + 1) + ")";
+      el.textContent = "Server band, qayta urinilmoqda... (" + (i + 1) + ")";
       await sleep(3000 * (i + 1));
     }
     var j = null;
@@ -99,7 +202,7 @@ async function send() {
       el.textContent = (j && j.error && j.error.message) || r.text || ("Xato " + r.status);
     } else {
       var parts = (j && j.candidates && j.candidates[0] && j.candidates[0].content && j.candidates[0].content.parts) || [];
-      var out = parts.map(function(p){ return p.text || ""; }).join("") || "(bo'sh javob)";
+      out = parts.map(function(p){ return p.text || ""; }).join("") || "(bo'sh javob)";
       el.textContent = out;
       hist.push({ role: "model", parts: [{ text: out }] });
       save();
@@ -110,34 +213,68 @@ async function send() {
     el.textContent = String(e);
   }
   busy = false;
+  setState("idle");
   $("msgs").scrollTop = $("msgs").scrollHeight;
+  if (out && speakOn()) Native.speak(clean(out), getLang());
 }
 
+/* native callbacks */
+function onSpeakState(s) { setState(s === "start" ? "speak" : (busy ? "think" : "idle")); }
+function onTtsError(kind) {
+  setState(busy ? "think" : "idle");
+  if (ttsWarned) return;
+  ttsWarned = true;
+  if (kind === "lang") {
+    add("model", "Telefonda '" + getLang() + "' tili uchun ovoz topilmadi. Telefon sozlamalarida Google 'Speech Services' (matnni ovozga aylantirish) ni o'rnatib yangilang, yoki ⚙ dan ovoz tilini o'zgartiring (masalan ru-RU).", true);
+  } else {
+    add("model", "Ovoz tizimi hali tayyor emas. Bir ozdan keyin qayta urinib ko'ring.", true);
+  }
+}
+function onVoice(b64) {
+  var text = new TextDecoder().decode(Uint8Array.from(atob(b64), function(c){ return c.charCodeAt(0); }));
+  setState("think");
+  $("inp").value = text;
+  send();
+}
+function onVoiceError(kind) {
+  setState("idle");
+  if (kind === "no_service") add("model", "Telefonda ovoz tanish xizmati topilmadi (Google ilovasi kerak).", true);
+}
+
+/* ui */
+function refreshSpk() { $("bSpk").textContent = speakOn() ? "🔊" : "🔇"; }
 function openSet() {
   $("key").value = Native.get("key", "");
   $("model").value = getModel();
+  $("lang").value = getLang();
   $("set").style.display = "flex";
 }
+$("bSpk").onclick = function(){
+  Native.set("speak", speakOn() ? "0" : "1");
+  if (!speakOn()) Native.stopSpeak();
+  refreshSpk();
+};
 $("bSet").onclick = openSet;
 $("bCancel").onclick = function(){ $("set").style.display = "none"; };
 $("bSave").onclick = function(){
   Native.set("key", $("key").value.trim());
   Native.set("model", $("model").value.trim());
+  Native.set("lang", $("lang").value.trim());
+  ttsWarned = false;
   $("set").style.display = "none";
 };
-$("bClear").onclick = function(){ hist = []; save(); $("msgs").innerHTML = ""; };
+$("bClear").onclick = function(){
+  Native.stopSpeak(); hist = []; save(); $("msgs").innerHTML = ""; showHero();
+};
 $("go").onclick = send;
-function onVoice(b64) {
-  var text = new TextDecoder().decode(Uint8Array.from(atob(b64), function(c){ return c.charCodeAt(0); }));
-  $("inp").value = text;
-  send();
-}
-function onVoiceError(kind) {
-  if (kind === "no_service") add("model", "Telefonda ovoz tanish xizmati topilmadi (Google ilovasi kerak).", true);
-}
-$("mic").onclick = function(){ Native.listen("uz-UZ"); };
+$("mic").onclick = function(){
+  Native.stopSpeak();
+  setState("listen");
+  Native.listen(getLang());
+};
 
-
+refreshSpk();
+if (hist.length === 0) showHero();
 hist.forEach(function(m){ add(m.role, m.parts.map(function(p){ return p.text; }).join("")); });
 if (!Native.get("key", "")) openSet();
 </script>
