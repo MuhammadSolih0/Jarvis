@@ -57,6 +57,7 @@ public class MainActivity extends Activity {
     private File recFile;
     private boolean recActive = false, recSpoke = false, pendingListen = false;
     private long recStart, lastLoud;
+    private int pollN = 0, noise = 0;
     private final Runnable poll = new Runnable() {
         @Override
         public void run() {
@@ -68,7 +69,11 @@ public class MainActivity extends Activity {
                 // ignore
             }
             long now = SystemClock.elapsedRealtime();
-            if (amp > 2200) {
+            pollN++;
+            if (pollN <= 10 && amp > 0 && (noise == 0 || amp < noise)) noise = amp;
+            int thr = Math.max(900, noise * 3);
+            js("onLevel(" + amp + ")");
+            if (amp > thr) {
                 recSpoke = true;
                 lastLoud = now;
             }
@@ -181,6 +186,8 @@ public class MainActivity extends Activity {
             rec.prepare();
             rec.start();
             long now = SystemClock.elapsedRealtime();
+            pollN = 0;
+            noise = 0;
             recActive = true;
             recSpoke = false;
             recStart = now;
@@ -215,6 +222,7 @@ public class MainActivity extends Activity {
     }
 
     private void transcribe() {
+        js("setState('think')");
         final File f = recFile;
         new Thread(new Runnable() {
             @Override
@@ -527,6 +535,10 @@ public class MainActivity extends Activity {
             runOnUiThread(new Runnable() {
                 @Override
                 public void run() {
+                    if (!recActive) {
+                        js("onVoiceError('cancel')");
+                        return;
+                    }
                     finishRec(send, true);
                 }
             });

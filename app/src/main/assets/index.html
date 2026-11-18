@@ -101,6 +101,7 @@ body[data-state=listen] #mic{animation:ring 1s ease-out infinite}
   <label>Ovoz tili (masalan uz-UZ, ru-RU, en-US) - faqat Google ovozi uchun</label><input id="lang" type="text" autocomplete="off">
   <label>ElevenLabs API kaliti (bo'sh bo'lsa Google ovozi ishlaydi)</label><input id="elkey" type="password" autocomplete="off">
   <label>ElevenLabs Voice ID (bo'sh bo'lsa o'zi tanlaydi)</label><input id="elvoice" type="text" autocomplete="off">
+  <label>Tinglash usuli: bo'sh = ElevenLabs, google = Google oynasi</label><input id="stt" type="text" autocomplete="off">
   <label>ElevenLabs ovoz modeli (bo'sh bo'lsa eleven_v3)</label><input id="elmodel" type="text" autocomplete="off">
   <div class="row"><button id="bCancel">BEKOR</button><button id="bSave" class="p">SAQLASH</button></div>
 </div></div>
@@ -224,13 +225,14 @@ async function send() {
   else if (cont) stopCont();
 }
 
+function elListen() { return elOn() && Native.get("stt", "") !== "google"; }
 function elOn() { return !!Native.get("elkey", ""); }
 function say(t) {
   lastSay = t;
   if (elOn()) Native.speakEL(t); else Native.speak(t, getLang());
 }
 function startListen() {
-  if (elOn()) Native.listenEL(); else Native.listen(getLang());
+  if (elListen()) Native.listenEL(); else Native.listen(getLang());
 }
 function stateIs(s) { return document.body.getAttribute("data-state") === s; }
 
@@ -270,10 +272,15 @@ function onVoice(b64) {
   $("inp").value = text;
   send();
 }
+function onLevel(a) {
+  if (stateIs("listen")) $("stat").textContent = "TINGLAYAPMAN " + "|".repeat(Math.min(12, Math.round(a / 1200)));
+}
 function onVoiceError(kind) {
   setState("idle");
   if (cont) stopCont();
   if (kind === "no_service") add("model", "Telefonda ovoz tanish xizmati topilmadi (Google ilovasi kerak).", true);
+  if (kind === "silence") add("model", "Ovoz eshitilmadi. Mikrofonga yaqinroq va balandroq gapiring.", true);
+  if (kind === "empty") add("model", "Gap tanilmadi. Qayta urinib ko'ring.", true);
   if (kind === "perm") add("model", "Mikrofon ruxsati berilmadi. Telefon sozlamalari > Ilovalar > Jarvis > Ruxsatlar > Mikrofon ni yoqing.", true);
 }
 function onElError(kind, b64) {
@@ -298,6 +305,7 @@ function openSet() {
   $("elkey").value = Native.get("elkey", "");
   $("elvoice").value = Native.get("elvoice", "");
   $("elmodel").value = Native.get("elmodel", "");
+  $("stt").value = Native.get("stt", "");
   $("set").style.display = "flex";
 }
 $("bSpk").onclick = function(){
@@ -310,7 +318,7 @@ $("bCont").onclick = function(){
   Native.set("cont", cont ? "1" : "0");
   refreshCont();
   if (!cont) {
-    if (stateIs("listen") && elOn()) Native.stopListen(false);
+    if (stateIs("listen") && elListen()) Native.stopListen(false);
     if (stateIs("listen")) setState("idle");
     return;
   }
@@ -329,6 +337,7 @@ $("bSave").onclick = function(){
   Native.set("elkey", $("elkey").value.trim());
   Native.set("elvoice", $("elvoice").value.trim());
   Native.set("elmodel", $("elmodel").value.trim());
+  Native.set("stt", $("stt").value.trim().toLowerCase());
   ttsWarned = false;
   $("set").style.display = "none";
 };
@@ -337,7 +346,7 @@ $("bClear").onclick = function(){
 };
 $("go").onclick = send;
 $("mic").onclick = function(){
-  if (stateIs("listen") && elOn()) { Native.stopListen(true); setState("think"); return; }
+  if (stateIs("listen") && elListen()) { Native.stopListen(true); return; }
   Native.stopSpeak();
   setState("listen");
   startListen();
