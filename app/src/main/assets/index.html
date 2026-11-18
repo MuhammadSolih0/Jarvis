@@ -103,14 +103,17 @@ body[data-state=listen] #mic{animation:ring 1s ease-out infinite}
   <label>ElevenLabs Voice ID (bo'sh bo'lsa o'zi tanlaydi)</label><input id="elvoice" type="text" autocomplete="off">
   <label>Tinglash usuli: bo'sh = ElevenLabs, google = Google oynasi</label><input id="stt" type="text" autocomplete="off">
   <label>ElevenLabs ovoz modeli (bo'sh bo'lsa eleven_v3)</label><input id="elmodel" type="text" autocomplete="off">
+  <label>Telefonni boshqarish (boshqa ilovalarda bosish va yozish)</label>
+  <button id="bA11y" type="button" style="flex:none;width:100%;margin-top:4px">📱 RUXSATNI YOQISH</button>
+  <div id="a11yS" style="font-size:12px;color:var(--dim);margin:4px 0 8px"></div>
   <div class="row"><button id="bCancel">BEKOR</button><button id="bSave" class="p">SAQLASH</button></div>
 </div></div>
 <script>
-var SYS = "Sen J.A.R.V.I.S.san, Tony Starkning aqlli sun'iy intellekt yordamchisi uslubida. Foydalanuvchiga doim 'ser' deb murojaat qil. Muloyim, bosiq, ishonchli va ozgina quruq hazilli bo'l. Javoblaring juda qisqa bo'lsin: odatda 1-3 gap, og'zaki nutqqa mos. Foydalanuvchi qaysi tilda yozsa, shu tilda javob ber. Markdown belgilarini (yulduzcha, #, ro'yxat) ishlatma. Bilmagan narsani to'qima, ochiq ayt.";
+var SYS = "Sen J.A.R.V.I.S.san, Tony Starkning aqlli sun'iy intellekt yordamchisi uslubida. Foydalanuvchiga doim 'ser' deb murojaat qil. Muloyim, bosiq, ishonchli va ozgina quruq hazilli bo'l. Javoblaring juda qisqa bo'lsin: odatda 1-3 gap, og'zaki nutqqa mos. Foydalanuvchi qaysi tilda yozsa, shu tilda javob ber. Markdown belgilarini (yulduzcha, #, ro'yxat) ishlatma. Bilmagan narsani to'qima, ochiq ayt. " + "TELEFONNI BOSHQARISH: foydalanuvchi telefonda amal bajarishni aniq so'rasa, qisqa javobingning OXIRIGA har bir amal uchun bitta blok qo'sh: @@{JSON}@@. Amallar: " + "{\"a\":\"open\",\"app\":\"Instagram\"} ilovani ochish; {\"a\":\"dial\",\"to\":\"kontakt ismi yoki raqam\"} qo'ng'iroq oynasini ochish; {\"a\":\"alarm\",\"h\":7,\"m\":30,\"label\":\"nom\"} budilnik; {\"a\":\"timer\",\"sec\":300} taymer; {\"a\":\"torch\",\"on\":true} chiroq; {\"a\":\"url\",\"url\":\"https://...\"} havola ochish (qidiruv: https://www.google.com/search?q=...); " + "{\"a\":\"agent\",\"goal\":\"...\"} boshqa ilovalar ichida bir necha bosqichli ish (xabar yozish va yuborish, galereyadagi videoni joylash va hokazo). goal ga hamma tafsilotni to'liq yoz: qaysi ilova, kimga, aynan qanday matn, qaysi fayl, qanday tavsif. Telegramda username berilsa uni ham yoz. " + "Blokni faqat foydalanuvchi aniq so'raganda qo'sh va javobga 'Bajaraman, ser' kabi qisqa gap yoz. Yuborish va joylash tugmasini ilova o'zi foydalanuvchidan so'rab tasdiqlatadi.";
 var $ = function(id){ return document.getElementById(id); };
 var hist = [];
 try { hist = JSON.parse(Native.get("hist", "[]")); } catch (e) { hist = []; }
-var pending = {}, busy = false, seq = 0, ttsWarned = false, cont = Native.get("cont", "0") === "1", wasSpeaking = false, lastSay = "";
+var pending = {}, busy = false, seq = 0, ttsWarned = false, cont = Native.get("cont", "0") === "1", wasSpeaking = false, lastSay = "", acts = [];
 
 function reactor() {
   var sp = "";
@@ -157,7 +160,7 @@ function callNative(model, body) {
 function showHero() {
   var h = document.createElement("div");
   h.id = "hero";
-  h.innerHTML = '<div class="big">' + reactor() + '</div><p class="h">SALOM, SER. MEN JARVISMAN.</p><p>🎤 YOKI 🎧 (UZLUKSIZ SUHBAT)</p>';
+  h.innerHTML = '<div class="big">' + reactor() + '</div><p class="h">SALOM, SER. MEN JARVISMAN.</p><p>🎤 YOKI 🎧 (UZLUKSIZ SUHBAT)<br>TELEFONNI BOSHQARISH: ⚙</p>';
   $("msgs").appendChild(h);
 }
 function add(role, text, isErr) {
@@ -177,6 +180,11 @@ function add(role, text, isErr) {
 }
 
 async function send() {
+  if (stateIs("listen") && elListen()) {
+    if (!$("inp").value.trim()) { Native.stopListen(true); return; }
+    Native.stopListen(false);
+    if (cont) stopCont();
+  }
   var t = $("inp").value.trim();
   if (!t || busy) return;
   if (!Native.get("key", "")) { openSet(); setState("idle"); return; }
@@ -208,8 +216,12 @@ async function send() {
     } else {
       var parts = (j && j.candidates && j.candidates[0] && j.candidates[0].content && j.candidates[0].content.parts) || [];
       out = parts.map(function(p){ return p.text || ""; }).join("") || "(bo'sh javob)";
+      var raw = out;
+      acts = [];
+      out = out.replace(/@@\s*(\{[\s\S]*?\})\s*@@/g, function(m, jj){ acts.push(jj); return ""; }).trim();
+      if (!out && acts.length) out = "Bajaraman, ser.";
       el.textContent = out;
-      hist.push({ role: "model", parts: [{ text: out }] });
+      hist.push({ role: "model", parts: [{ text: raw }] });
       save();
     }
   } catch (e) {
@@ -220,9 +232,33 @@ async function send() {
   busy = false;
   setState("idle");
   $("msgs").scrollTop = $("msgs").scrollHeight;
+  var todo = acts; acts = [];
+  if (todo.length && cont) stopCont();
   if (out && speakOn()) say(clean(out));
-  else if (out) autoListen();
-  else if (cont) stopCont();
+  else if (out && !todo.length) autoListen();
+  else if (!out && cont) stopCont();
+  if (todo.length) runActs(todo);
+}
+
+function runActs(list) {
+  list.forEach(function(j){
+    var r = "";
+    try { r = Native.quick(j); } catch (e) { r = "XATO: " + e; }
+    if (r === "OFF") {
+      add("model", "Telefonni boshqarish uchun ruxsat kerak. Ochilgan oynada Jarvis ni topib, yoqing (Samsung: Maxsus imkoniyatlar > O'rnatilgan ilovalar > Jarvis). Keyin buyruqni qayta ayting.", true);
+      Native.openA11y();
+    } else if (r.indexOf("XATO") === 0) {
+      add("model", r, true);
+    }
+  });
+}
+function onAgentDone(b64) {
+  var t = new TextDecoder().decode(Uint8Array.from(atob(b64), function(c){ return c.charCodeAt(0); }));
+  add("model", t);
+  var last = hist[hist.length - 1];
+  if (last && last.role === "model") last.parts[0].text += "\n[Natija: " + t + "]";
+  else hist.push({ role: "model", parts: [{ text: t }] });
+  save();
 }
 
 function elListen() { return elOn() && Native.get("stt", "") !== "google"; }
@@ -243,6 +279,7 @@ function autoListen() {
   if (stateIs("listen")) return;
   setTimeout(function(){
     if (!cont || busy || stateIs("listen") || stateIs("speak")) return;
+    if (document.activeElement === $("inp")) return;
     setState("listen");
     startListen();
   }, 500);
@@ -273,7 +310,7 @@ function onVoice(b64) {
   send();
 }
 function onLevel(a) {
-  if (stateIs("listen")) $("stat").textContent = "TINGLAYAPMAN " + "|".repeat(Math.min(12, Math.round(a / 1200)));
+  if (stateIs("listen")) $("stat").textContent = "TINGLAYAPMAN " + "|".repeat(Math.min(10, Math.round(a / 1200))) + "  (YUBORISH: 🎤)";
 }
 function onVoiceError(kind) {
   setState("idle");
@@ -306,6 +343,7 @@ function openSet() {
   $("elvoice").value = Native.get("elvoice", "");
   $("elmodel").value = Native.get("elmodel", "");
   $("stt").value = Native.get("stt", "");
+  $("a11yS").textContent = Native.a11yOn() ? "Holat: YOQILGAN ✅" : "Holat: o'chiq. Tugmani bosib, Jarvis ni yoqing.";
   $("set").style.display = "flex";
 }
 $("bSpk").onclick = function(){
@@ -328,6 +366,10 @@ $("bCont").onclick = function(){
   setState("listen");
   startListen();
 };
+$("inp").addEventListener("focus", function(){
+  if (stateIs("listen") && elListen()) { Native.stopListen(false); setState("idle"); if (cont) stopCont(); }
+});
+$("bA11y").onclick = function(){ Native.openA11y(); };
 $("bSet").onclick = openSet;
 $("bCancel").onclick = function(){ $("set").style.display = "none"; };
 $("bSave").onclick = function(){

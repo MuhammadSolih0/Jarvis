@@ -14,6 +14,8 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
+import android.provider.Settings;
+import android.widget.Toast;
 import android.speech.RecognizerIntent;
 import android.speech.tts.TextToSpeech;
 import android.speech.tts.UtteranceProgressListener;
@@ -41,6 +43,8 @@ import java.util.Locale;
 
 public class MainActivity extends Activity {
     private static final int REQ_VOICE = 101;
+    static MainActivity inst;
+    private Bridge bridge;
 
     private WebView web;
     private SharedPreferences prefs;
@@ -304,6 +308,87 @@ public class MainActivity extends Activity {
         pendingListen = false;
     }
 
+
+    // ---------- telefonni boshqarish yordamchilari ----------
+
+    void sayFromService(final String text) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                if (prefs.getString("speak", "1").equals("0")) return;
+                if (prefs.getString("elkey", "").length() > 0) {
+                    bridge.speakEL(text);
+                } else {
+                    String lg = prefs.getString("lang", "");
+                    bridge.speak(text, lg.length() > 0 ? lg : "uz-UZ");
+                }
+            }
+        });
+    }
+
+    void agentDone(final String text) {
+        js("onAgentDone('" + b64(text) + "')");
+        sayFromService(text);
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                Toast.makeText(MainActivity.this, text, Toast.LENGTH_LONG).show();
+            }
+        });
+    }
+
+    private boolean hasPerm(String perm) {
+        return checkSelfPermission(perm) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private void askPerms(final String[] perms) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                requestPermissions(perms, 203);
+            }
+        });
+    }
+
+    private String runQuick(String json) throws Exception {
+        JSONObject o = new JSONObject(json);
+        String a = o.optString("a", "");
+        if (a.equals("open")) return Hands.openApp(this, o.optString("app"));
+        if (a.equals("dial")) {
+            String to = o.optString("to");
+            boolean digits = to.replaceAll("[^0-9]", "").length() >= 5;
+            if (!digits && !hasPerm("android.permission.READ_CONTACTS")) {
+                askPerms(new String[]{"android.permission.READ_CONTACTS"});
+                return "XATO: kontaktlarga ruxsat so'raldi. Ruxsat berib, buyruqni qayta ayting.";
+            }
+            return Hands.dial(this, to);
+        }
+        if (a.equals("alarm")) return Hands.alarm(this, o.optInt("h"), o.optInt("m"), o.optString("label", "Jarvis"));
+        if (a.equals("timer")) return Hands.timer(this, o.optInt("sec", 60), o.optString("label", "Jarvis"));
+        if (a.equals("torch")) return Hands.torch(this, o.optBoolean("on", true));
+        if (a.equals("url")) return Hands.url(this, o.optString("url"));
+        if (a.equals("agent")) {
+            JarvisAccessibility s = JarvisAccessibility.inst;
+            if (s == null) return "OFF";
+            ArrayList<String> need = new ArrayList<String>();
+            if (!hasPerm("android.permission.READ_CONTACTS")) need.add("android.permission.READ_CONTACTS");
+            if (Build.VERSION.SDK_INT >= 33) {
+                if (!hasPerm("android.permission.READ_MEDIA_VIDEO")) need.add("android.permission.READ_MEDIA_VIDEO");
+                if (!hasPerm("android.permission.READ_MEDIA_IMAGES")) need.add("android.permission.READ_MEDIA_IMAGES");
+            } else if (!hasPerm("android.permission.READ_EXTERNAL_STORAGE")) {
+                need.add("android.permission.READ_EXTERNAL_STORAGE");
+            }
+            if (!need.isEmpty()) {
+                askPerms(need.toArray(new String[0]));
+                return "XATO: kontakt va galereya ruxsatlari so'raldi. Hammasiga ruxsat berib, buyruqni qayta ayting.";
+            }
+            if (s.isRunning()) return "XATO: avvalgi vazifa hali ketyapti.";
+            s.start(o.optString("goal"));
+            return "OK";
+        }
+        return "XATO: noma'lum amal.";
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -313,7 +398,9 @@ public class MainActivity extends Activity {
         WebSettings s = web.getSettings();
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
-        web.addJavascriptInterface(new Bridge(), "Native");
+        inst = this;
+        bridge = new Bridge();
+        web.addJavascriptInterface(bridge, "Native");
         web.loadUrl("file:///android_asset/index.html");
         initTts("com.google.android.tts");
     }
@@ -354,7 +441,7 @@ public class MainActivity extends Activity {
         }, engine);
     }
 
-    private void js(final String code) {
+    void js(final String code) {
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
@@ -437,6 +524,31 @@ public class MainActivity extends Activity {
             stopPlayer();
             if (tts != null && ttsReady) tts.stop();
             js("onSpeakState('done')");
+        }
+
+        @JavascriptInterface
+        public String quick(final String json) {
+            try {
+                return runQuick(json);
+            } catch (Exception e) {
+                return "XATO: " + e.getMessage();
+            }
+        }
+
+        @JavascriptInterface
+        public boolean a11yOn() {
+            return JarvisAccessibility.inst != null;
+        }
+
+        @JavascriptInterface
+        public void openA11y() {
+            try {
+                Intent i = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(i);
+            } catch (Exception e) {
+                // ignore
+            }
         }
 
         @JavascriptInterface
@@ -599,14 +711,12 @@ public class MainActivity extends Activity {
     @Override
     protected void onPause() {
         super.onPause();
-        if (tts != null && ttsReady) tts.stop();
-        elGen++;
-        stopPlayer();
         if (recActive) finishRec(false, false);
     }
 
     @Override
     protected void onDestroy() {
+        if (inst == this) inst = null;
         if (tts != null) {
             tts.stop();
             tts.shutdown();
